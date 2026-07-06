@@ -84,6 +84,7 @@ class TrainCliConfig:
     video_interval: int = 2_000
     viewer: Literal["none", "native"] = "none"
     viewer_fps: float = 60.0
+    headless: bool = False
     gpu_ids: list[int] | Literal["all"] | None = None
     torchrunx_log_dir: str | None = None
 
@@ -534,6 +535,9 @@ def main() -> None:
         config=mjlab.TYRO_FLAGS,
     )
 
+    if cli_cfg.headless:
+        cli_cfg.viewer = "none"
+
     args = replace(
         TrainConfig.from_task(chosen_task),
         motion_file=cli_cfg.motion_file,
@@ -549,6 +553,10 @@ def main() -> None:
         torchrunx_log_dir=cli_cfg.torchrunx_log_dir,
     )
     _apply_dot_overrides(args, dot_override_args)
+
+    if cli_cfg.headless:
+        args.env.headless = True
+
     launch_training(task_id=chosen_task, args=args)
 
 

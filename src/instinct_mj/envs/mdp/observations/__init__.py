@@ -5,3 +5,4 @@ from .exteroception import *  # noqa: F401,F403
 from .motion_reference import *  # noqa: F401,F403
 from .reference_as_state import *  # noqa: F401,F403
 from .reference_masked_proprioception import *  # noqa: F401,F403
+from .residual_action import *  # noqa: F401,F403

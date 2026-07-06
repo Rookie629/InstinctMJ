@@ -41,6 +41,11 @@ class InstinctRlActorCriticCfg:
     vae_latent_size: int | None = None
     vae_input_subobs_components: tuple[str, ...] | None = None
     vae_aux_subobs_components: tuple[str, ...] | None = None
+    # HDMI residual policy
+    residual_action_component: str | None = None
+    """Name of the observation component carrying the normalised reference action
+    ``ref_action``.  Set to ``"ref_action"`` to enable HDMI-style residual
+    composition.  ``None`` (default) disables the residual path."""
 
 
 @dataclass

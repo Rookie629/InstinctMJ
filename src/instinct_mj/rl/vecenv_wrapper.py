@@ -148,7 +148,78 @@ class InstinctRlVecEnvWrapper(VecEnv):
             rewards = torch.stack(list(rewards.values()), dim=-1)
         if rewards.ndim == 1:
             rewards = rewards.unsqueeze(1)
+
+        # HDMI residual debug logging (see docs/hdmi_residual_policy_implementation.md §12).
+        self._log_residual_debug(extras, actions, packed_obs)
+
         return packed_obs["policy"], rewards, dones, extras
+
+    # ------------------------------------------------------------------
+    # HDMI residual debug helpers
+    # ------------------------------------------------------------------
+
+    def _log_residual_debug(
+        self,
+        extras: dict,
+        actions: torch.Tensor,
+        packed_obs: dict[str, torch.Tensor],
+    ) -> None:
+        """Log HDMI residual-action diagnostic signals.
+
+        Logged keys (all prefixed with ``Step/``):
+          - ``mean_abs_final_action``   — |final_action| averaged over batch
+          - ``mean_abs_ref_action``     — |ref_action| from observations
+          - ``q_target_minus_q_ref_abs``— |q_target - q_ref| (the residual in rad)
+        """
+        try:
+            log_info = extras.setdefault("log", {})
+
+            # 1. Mean absolute final normalized action.
+            log_info["mean_abs_final_action"] = actions.abs().mean(dim=-1).detach().cpu()
+
+            # 2. Mean absolute ref_action from packed observations (if present).
+            ref_action = self._extract_ref_action(packed_obs)
+            if ref_action is not None:
+                log_info["mean_abs_ref_action"] = ref_action.abs().mean(dim=-1).detach().cpu()
+
+                # 3. Residual magnitude in rad: q_target - q_ref.
+                #    q_target = q_default + action_scale * final_action
+                #    q_ref    = q_default + action_scale * ref_action
+                #    ⇒ q_target - q_ref = action_scale * (final_action - ref_action)
+                delta_action = actions - ref_action
+                action_scale = self._get_action_scale_tensor()
+                if action_scale is not None:
+                    q_target_minus_q_ref = action_scale * delta_action
+                    log_info["q_target_minus_q_ref_abs"] = (
+                        q_target_minus_q_ref.abs().mean(dim=-1).detach().cpu()
+                    )
+        except Exception:
+            pass  # Debug logging must never crash the training loop.
+
+    def _extract_ref_action(
+        self, packed_obs: dict[str, torch.Tensor]
+    ) -> torch.Tensor | None:
+        """Extract ``ref_action`` from packed observations if present."""
+        obs_format = self.get_obs_format()
+        policy_segments = obs_format.get("policy", {})
+        if "ref_action" not in policy_segments:
+            return None
+
+        from instinct_rl.utils.utils import get_obs_slice
+
+        obs_slice, _shape = get_obs_slice(policy_segments, "ref_action")
+        return packed_obs["policy"][..., obs_slice]
+
+    def _get_action_scale_tensor(self) -> torch.Tensor | None:
+        """Return the per-joint action scale tensor, shape (num_envs, action_dim)."""
+        try:
+            joint_pos_action = self.unwrapped.action_manager.get_term("joint_pos")
+            scale = joint_pos_action.scale
+            if isinstance(scale, torch.Tensor):
+                return scale
+        except Exception:
+            pass
+        return None
 
     def close(self) -> None:
         self.env.close()

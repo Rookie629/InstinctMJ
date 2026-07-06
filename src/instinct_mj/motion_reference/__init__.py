@@ -12,6 +12,11 @@ from __future__ import annotations
 from .motion_reference_cfg import MotionReferenceManagerCfg, NoCollisionPropertiesCfg
 from .motion_reference_data import MotionReferenceData, MotionReferenceState, MotionSequence
 from .motion_reference_hoi_data import HoiMotionReferenceData, HoiMotionReferenceState, HoiMotionSequence
+from .motion_reference_part2link_data import (
+    Part2LinkMotionReferenceData,
+    Part2LinkMotionReferenceState,
+    Part2LinkMotionSequence,
+)
 from .motion_reference_manager import MotionReferenceManager
 
 __all__ = [name for name in globals() if not name.startswith("_")]

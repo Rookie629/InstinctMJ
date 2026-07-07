@@ -8,7 +8,9 @@ from pathlib import Path
 
 from instinct_mj.tasks.interaction.mdp.part2link import _alpha_to_glb_name, _alpha_to_token
 
-DEFAULT_DATASET_ROOT = "/home/yangke/KY/InstinctLab_interact/datasets/interaction/output_npz_29dof_with_object"
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
+_DATA_DIR = os.path.join(_PROJECT_ROOT, "data", "datasets", "interaction")
+DEFAULT_DATASET_ROOT = os.path.join(_DATA_DIR, "output_npz_29dof_with_object")
 DEFAULT_CHAIRS = (
     "chair_14",
     "chair_15",

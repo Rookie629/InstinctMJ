@@ -10,11 +10,15 @@ from mjlab.actuator import ActuatorCfg, BuiltinPdActuatorCfg
 from mjlab.entity import EntityArticulationInfoCfg, EntityCfg
 
 __file_dir__ = os.path.dirname(os.path.realpath(__file__))
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(__file_dir__)))
+
+# Unified data directory (see docs/vibe-coding-log.md).
+_DATA_DIR = os.path.join(_PROJECT_ROOT, "data", "assets", "unitree_g1")
 
 # MJCF (XML) path – uses the local 29-dof torso-base popsicle model.
 # Joint-related semantics in this module follow the MuJoCo/MJCF native order.
-G1_MJCF_PATH: str = os.path.join(__file_dir__, "resources/unitree_g1/xml/g1_29dof_torsobase_popsicle.xml")
-G1_MESHES_DIR: str = os.path.join(__file_dir__, "resources/unitree_g1/meshes")
+G1_MJCF_PATH: str = os.path.join(_DATA_DIR, "xml", "g1_29dof_torsobase_popsicle.xml")
+G1_MESHES_DIR: str = os.path.join(_DATA_DIR, "meshes")
 
 """
 joint name order:

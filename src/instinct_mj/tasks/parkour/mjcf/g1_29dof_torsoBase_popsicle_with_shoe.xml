@@ -1,5 +1,5 @@
 <mujoco model="g1">
-  <compiler angle="radian" meshdir="../../../assets/resources/unitree_g1/meshes" autolimits="true" discardvisual="false" />
+  <compiler angle="radian" meshdir="../../../../data/assets/unitree_g1/meshes" autolimits="true" discardvisual="false" />
   <default>
     <joint damping="0.5" armature="0.01" frictionloss="0.1" />
     <geom group="3" contype="1" conaffinity="1" />

@@ -30,7 +30,13 @@ from instinct_mj.motion_reference.utils import motion_interpolate_bilinear
 
 G1_CFG = G1_29DOF_TORSOBASE_POPSICLE_CFG
 
-DEFAULT_DATASET_ROOT = "/home/yangke/KY/InstinctLab_interact/datasets/interaction/output_npz_29dof_with_object"
+# Resolve project-root-relative data directory.
+_PROJECT_ROOT = os.path.dirname(
+    os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))))
+)
+_DATA_DIR = os.path.join(_PROJECT_ROOT, "data", "datasets", "interaction")
+
+DEFAULT_DATASET_ROOT = os.path.join(_DATA_DIR, "output_npz_29dof_with_object")
 PART2LINK_DATASET_ROOT = os.path.expanduser(os.getenv("INSTINCT_PART2LINK_DATASET_ROOT", DEFAULT_DATASET_ROOT))
 PART2LINK_METADATA_YAML = os.path.join(PART2LINK_DATASET_ROOT, "metadata.yaml")
 PART2LINK_METADATA_ROOT = os.path.join(PART2LINK_DATASET_ROOT, "sparse_contact_maps")

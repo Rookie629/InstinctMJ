@@ -8,6 +8,12 @@ videos/
 *.log
 *.out
 
+# Datasets and cached assets
+data/
+
+# Experiment records
+docs/experiments/
+
 # Build metadata and generated native artifacts
 build/
 dist/

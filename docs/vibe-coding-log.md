@@ -183,3 +183,48 @@ uv run python -m instinct_mj.scripts.instinct_rl.train \
 - `instinct_rl/modules/actor_critic.py` — base `ActorCritic` class
 - `instinct_rl/modules/encoder_actor_critic.py` — `EncoderActorCriticMixin`
 - `src/instinct_mj/assets/unitree_g1.py` — `beyondmimic_action_scale`
+
+---
+
+## 2026-07-06 #2 — Consolidate assets & data into `data/`
+
+> **Branch**: contact
+
+Moved robot assets and motion-reference datasets into a unified `data/`
+directory at the project root.
+
+### Directory structure
+
+```
+data/
+├── assets/
+│   └── unitree_g1/         # moved from src/instinct_mj/assets/resources/unitree_g1/
+│       ├── meshes/         # 42MB STL meshes
+│       ├── xml/            # MJCF XML
+│       └── urdf/           # URDF variants
+└── datasets/
+    └── interaction/        # symlink → /home/yangke/KY/InstinctLab_interact/datasets/interaction/
+        └── output_npz_29dof_with_object/  # 1.3GB motion data
+```
+
+### Files changed
+
+| File | Change |
+|------|--------|
+| `src/instinct_mj/assets/resources/unitree_g1/` | **moved** → `data/assets/unitree_g1/` |
+| `data/datasets/interaction` | **new symlink** → external dataset |
+| `src/instinct_mj/assets/unitree_g1.py` | `G1_MJCF_PATH`, `G1_MESHES_DIR` → project-root-relative via `_DATA_DIR` |
+| `src/instinct_mj/tasks/interaction/config/g1/g1_interaction_sitting_part2link_shadowing_cfg.py` | `PART2LINK_DATASET_ROOT` → `data/datasets/interaction/...` |
+| `src/instinct_mj/scripts/prepare_part2link_assets.py` | `DEFAULT_DATASET_ROOT` → `data/datasets/interaction/...` |
+| `src/instinct_mj/tasks/parkour/mjcf/g1_29dof_torsoBase_popsicle_with_shoe.xml` | `meshdir` → `../../../../data/assets/unitree_g1/meshes` |
+
+### Path resolution pattern
+
+All paths now resolve relative to the project root (computed from `__file__`):
+
+```python
+_PROJECT_ROOT = os.path.dirname(...)  # walk up from __file__
+_DATA_DIR = os.path.join(_PROJECT_ROOT, "data", ...)
+```
+
+No hardcoded `/home/yangke/` paths remain in source.

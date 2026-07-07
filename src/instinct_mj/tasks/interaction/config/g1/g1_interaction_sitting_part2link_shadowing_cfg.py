@@ -501,6 +501,7 @@ class G1InteractionSittingPart2LinkShadowingEnvCfg(perceptual_cfg.PerceptiveHoiS
         self.sim.nconmax = 256
         self.sim.mujoco.jacobian = "sparse"
         self.scene.env_spacing = SITTING_PART2LINK_ENV_SPACING
+        self.rewards["undesired_contacts"] = None
 
         self.observations["critic"].terms["link_pos"].params[
             "asset_cfg"
@@ -574,6 +575,7 @@ class G1InteractionSittingPart2LinkShadowingEnvCfg_PLAY(G1InteractionSittingPart
         self.rewards["part2link_vector_guidance_gauss"].params["debug_vis_show_contact_points"] = True
         self.rewards["part2link_vector_guidance_gauss"].params["debug_vis_show_part_centers"] = True
         self.rewards["part2link_vector_guidance_gauss"].params["debug_vis_ignore_contact_phase"] = False
+        self.events["reset_rigid_objects_state_by_reference"].params["scale_distribution_params"] = (1.0, 1.0)
         self.events["add_joint_default_pos"] = None
         self.events["base_com"] = None
         self.events["physics_material"] = None

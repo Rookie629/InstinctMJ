@@ -342,3 +342,90 @@ def randomize_rigid_body_material(
         asset_cfg=asset_cfg,
         shared_random=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# Object domain randomization events
+# ---------------------------------------------------------------------------
+
+
+def randomize_object_friction(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor | None,
+    asset_cfg: SceneEntityCfg,
+    static_friction_range: tuple[float, float] = (0.3, 1.6),
+    dynamic_friction_range: tuple[float, float] = (0.3, 1.2),
+) -> None:
+    """Randomize object geom friction via :func:`dr.geom_friction`.
+
+    Thin wrapper over the MJLab DR primitive that targets object entities
+    instead of the robot.  For mocap objects friction affects the contact
+    dynamics between the robot and the object.
+    """
+    slide_friction_range = (
+        min(static_friction_range[0], dynamic_friction_range[0]),
+        max(static_friction_range[1], dynamic_friction_range[1]),
+    )
+    dr.geom_friction(
+        env,
+        env_ids=env_ids,
+        ranges=slide_friction_range,
+        operation="abs",
+        asset_cfg=asset_cfg,
+        shared_random=True,
+    )
+
+
+@requires_model_fields("body_ipos", "body_iquat", recompute=RecomputeLevel.set_const)
+def randomize_object_com(
+    env: ManagerBasedEnv,
+    env_ids: torch.Tensor | None,
+    asset_cfg: SceneEntityCfg,
+    com_range: dict[str, tuple[float, float]],
+    distribution: Literal["uniform", "log_uniform", "gaussian"] = "uniform",
+) -> None:
+    """Randomize object center-of-mass offsets via :func:`dr.body_ipos`.
+
+    For mocap objects, COM randomization affects contact dynamics (contact
+    force distribution) but not the kinematic trajectory, which is dictated
+    by the motion reference.
+    """
+    axis_map = {"x": 0, "y": 1, "z": 2}
+    ranges = {
+        axis_map[axis_name]: axis_range
+        for axis_name, axis_range in com_range.items()
+        if axis_name in axis_map
+    }
+    if len(ranges) == 0:
+        return
+    dr.body_ipos(
+        env=env,
+        env_ids=env_ids,
+        ranges=ranges,
+        asset_cfg=asset_cfg,
+        distribution=distribution,
+        operation=_DR_ADD_CURRENT,
+        axes=sorted(ranges.keys()),
+    )
+
+
+def randomize_object_mass(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor | None,
+    asset_cfg: SceneEntityCfg,
+    mass_range: tuple[float, float] = (0.8, 1.2),
+    operation: Literal["add", "scale", "abs"] = "scale",
+) -> None:
+    """Randomize object body mass via :func:`dr.body_mass`.
+
+    For mocap objects mass randomization affects contact dynamics only
+    (the trajectory is kinematic).  This is primarily useful for
+    future free-body object configurations.
+    """
+    dr.body_mass(
+        env=env,
+        env_ids=env_ids,
+        ranges=mass_range,
+        operation=operation,
+        asset_cfg=asset_cfg,
+    )

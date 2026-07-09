@@ -541,14 +541,63 @@ def make_hoi_rewards() -> dict[str, RewTermCfg]:
     }
 
 
-def make_hoi_events() -> dict[str, EventTermCfg]:
+def make_hoi_object_dr_events(
+    object_names: list[str],
+    friction_range: tuple[float, float] = (0.5, 2.0),
+    com_range: dict[str, tuple[float, float]] | None = None,
+) -> dict[str, EventTermCfg]:
+    """Build object-focused domain randomization event terms.
+
+    Args:
+        object_names: Scene entity names to randomize (variant entity names).
+        friction_range: ``(min, max)`` for uniform friction sampling.
+        com_range: Per-axis COM offset ranges. Default ``±1cm`` each axis.
+    """
+    if com_range is None:
+        com_range = {"x": (-0.01, 0.01), "y": (-0.01, 0.01), "z": (-0.01, 0.01)}
+
+    events: dict[str, EventTermCfg] = {}
+    for obj_name in object_names:
+        events[f"object_friction_{obj_name}"] = EventTermCfg(
+            func=instinct_mdp.randomize_object_friction,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg(obj_name, geom_names=".*"),
+                "static_friction_range": friction_range,
+                "dynamic_friction_range": (friction_range[0] * 0.8, friction_range[1] * 0.8),
+            },
+        )
+        events[f"object_com_{obj_name}"] = EventTermCfg(
+            func=instinct_mdp.randomize_object_com,
+            mode="startup",
+            params={
+                "asset_cfg": SceneEntityCfg(obj_name, body_names=".*"),
+                "com_range": com_range,
+            },
+        )
+    return events
+
+
+def make_hoi_events(
+    object_dr_events: dict[str, EventTermCfg] | None = None,
+    variant_reset_event: EventTermCfg | None = None,
+    variant_update_event: EventTermCfg | None = None,
+) -> dict[str, EventTermCfg]:
     """Event specifications for the perceptive HOI shadowing MDP.
 
     Domain-randomization events mirror the perceptive task. HOI replaces
     'match_motion_ref_with_scene' (motion-matched terrain) with rigid-object
     reference reset/update events, matching IsaacLab's perceptive_hoi config.
+
+    Args:
+        object_dr_events: Optional object DR terms (from
+            :func:`make_hoi_object_dr_events`). Injected into the event dict.
+        variant_reset_event: If given, replaces the default
+            ``reset_rigid_objects_state_by_reference`` event (multi-variant mode).
+        variant_update_event: If given, replaces the default
+            ``update_rigid_objects_state_by_reference`` event (multi-variant mode).
     """
-    return {
+    events = {
         # domain rand
         "physics_material": EventTermCfg(
             func=mdp.dr.geom_friction,
@@ -697,14 +746,36 @@ def make_hoi_events() -> dict[str, EventTermCfg]:
         # ),
     }
 
+    # Inject object DR events (always active).
+    if object_dr_events:
+        events.update(object_dr_events)
 
-def make_hoi_curriculum() -> dict[str, CurriculumTermCfg]:
-    """Curriculum specifications for the perceptive HOI shadowing MDP."""
-    return {
+    # Optionally override reset / update with variant-aware versions.
+    if variant_reset_event is not None:
+        events["reset_rigid_objects_state_by_reference"] = variant_reset_event
+    if variant_update_event is not None:
+        events["update_rigid_objects_state_by_reference"] = variant_update_event
+
+    return events
+
+
+def make_hoi_curriculum(
+    object_curriculum_terms: dict[str, CurriculumTermCfg] | None = None,
+) -> dict[str, CurriculumTermCfg]:
+    """Curriculum specifications for the perceptive HOI shadowing MDP.
+
+    Args:
+        object_curriculum_terms: Optional object-difficulty curriculum terms
+            (e.g. ``ObjectAlphaCurriculum``, ``ObjectScaleCurriculum``).
+    """
+    curriculum = {
         "beyond_adaptive_sampling": CurriculumTermCfg(  # type: ignore
             func=instinct_mdp.BeyondConcatMotionAdaptiveWeighting,
         ),
     }
+    if object_curriculum_terms:
+        curriculum.update(object_curriculum_terms)
+    return curriculum
 
 
 def make_hoi_terminations() -> dict[str, DoneTermCfg]:

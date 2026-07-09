@@ -4,10 +4,8 @@ import os
 from copy import deepcopy
 from dataclasses import dataclass, field
 
-import mujoco
 from mjlab.entity import EntityCfg
-from mjlab.managers import SceneEntityCfg
-from mjlab.utils.spec_config import CollisionCfg
+from mjlab.managers import CurriculumTermCfg, EventTermCfg, SceneEntityCfg
 from mjlab.viewer.viewer_config import ViewerConfig
 
 import instinct_mj.tasks.shadowing.perceptive_hoi.perceptive_env_cfg as perceptual_cfg
@@ -17,11 +15,26 @@ from instinct_mj.assets.unitree_g1 import (
     beyondmimic_action_scale,
     beyondmimic_g1_29dof_actuator_cfgs,
 )
+from instinct_mj.envs.mdp.curriculums.object_difficulty import (
+    ObjectScaleCurriculum,
+)
+from instinct_mj.envs.mdp.events.object_variant import (
+    ObjectVariantCatalog,
+    reset_object_variant_by_reference,
+    update_object_variant_by_reference,
+)
 from instinct_mj.monitors import ActuatorMonitorTerm, MonitorTermCfg, ShadowingBasePosMonitorTerm
 from instinct_mj.motion_reference import HoiMotionReferenceData, HoiMotionReferenceState
 from instinct_mj.motion_reference.motion_reference_cfg import MotionReferenceManagerCfg
 from instinct_mj.motion_reference.motion_files.omomo_motion_cfg import OmomoMotionCfg as OmomoMotionCfgBase
 from instinct_mj.motion_reference.utils import motion_interpolate_bilinear
+from instinct_mj.tasks.shadowing.perceptive_hoi.mdp.object_variant_hoi import (
+    OMOMO_OBJECT_TYPES,
+    build_hoi_multi_variant_catalog,
+    build_hoi_single_mesh_catalog,
+    make_hoi_variant_camera_mesh_prim_paths,
+    make_hoi_variant_entities,
+)
 
 G1_CFG = G1_29DOF_TORSOBASE_POPSICLE_CFG
 
@@ -60,30 +73,36 @@ G1_29DOF_LINKS = [
 
 OMOMO_DATASET_PATH = "~/Datasets/OMOMO/retargeted"
 
-MESH_FILE_PATHS = {
-    "floorlamp": "~/Datasets/OMOMO/data/captured_objects/floorlamp_cleaned_simplified.obj",
-    "largebox": "~/Datasets/OMOMO/data/captured_objects/largebox_cleaned_simplified.obj",
-    "whitechair": "~/Datasets/OMOMO/data/captured_objects/whitechair_cleaned_simplified.obj",
-    "trashcan": "~/Datasets/OMOMO/data/captured_objects/trashcan_cleaned_simplified.obj",
-    "smalltable": "~/Datasets/OMOMO/data/captured_objects/smalltable_cleaned_simplified.obj",
-    "suitcase": "~/Datasets/OMOMO/data/captured_objects/suitcase_cleaned_simplified.obj",
-}
-MESH_FILE_SCALES = {
-    "floorlamp": (1.55 * 0.3793, 1.55 * 0.3793, 1.55 * 0.3793),
-    "largebox": (1.55 * 0.3486, 1.55 * 0.3486, 1.55 * 0.3486),
-    "whitechair": (1.55 * 0.3129, 1.55 * 0.3129, 1.55 * 0.3129),
-    "trashcan": (1.55 * 0.2326, 1.55 * 0.2326, 1.55 * 0.2326),
-    "smalltable": (1.55 * 0.0162, 1.55 * 0.0162, 1.55 * 0.0162),
-    "suitcase": (1.55 * 0.3672, 1.55 * 0.3672, 1.55 * 0.3672),
-}
+# ---------------------------------------------------------------------------
+# Multi-variant object support — gated behind INSTINCT_HOI_VARIANT_ROOT
+# ---------------------------------------------------------------------------
+
+HOI_VARIANT_ROOT = os.getenv("INSTINCT_HOI_VARIANT_ROOT", None)
+HOI_VARIANT_ASSET_CACHE = os.getenv("INSTINCT_HOI_VARIANT_ASSET_CACHE", None)
+_enable_multi_variant = HOI_VARIANT_ROOT is not None
+
+
+def _load_hoi_catalog() -> ObjectVariantCatalog:
+    """Load HOI object variant catalog.
+
+    Single-mesh mode (default): degenerate catalog with 1 variant per type.
+    Multi-variant mode (``INSTINCT_HOI_VARIANT_ROOT`` set): discover variants
+    from disk.
+    """
+    if _enable_multi_variant:
+        return build_hoi_multi_variant_catalog(
+            extension_root=HOI_VARIANT_ROOT,
+            object_types=OMOMO_OBJECT_TYPES,
+            asset_cache=HOI_VARIANT_ASSET_CACHE,
+        )
+    return build_hoi_single_mesh_catalog()
+
+
+_HOI_CATALOG = _load_hoi_catalog()
 
 
 def _make_hoi_camera_mesh_prim_paths() -> list[str]:
-    return (
-        ["/World/ground"]
-        + [f"/World/envs/env_.*/Robot/{link_name}" for link_name in G1_29DOF_LINKS]
-        + [f"/World/envs/env_.*/{object_name}" for object_name in MESH_FILE_PATHS]
-    )
+    return make_hoi_variant_camera_mesh_prim_paths(_HOI_CATALOG, link_names=G1_29DOF_LINKS)
 
 
 def _make_g1_hoi_scene_sensors(*, motion_reference) -> tuple:
@@ -93,44 +112,13 @@ def _make_g1_hoi_scene_sensors(*, motion_reference) -> tuple:
     return tuple(sensors)
 
 
-def _make_mesh_object_spec(mesh_file_path: str, scale: tuple[float, float, float]):
-    def spec_fn() -> mujoco.MjSpec:
-        spec = mujoco.MjSpec()
-        mesh = spec.add_mesh(name="object_mesh", file=os.path.expanduser(mesh_file_path), scale=scale)
-        body = spec.worldbody.add_body(name="object", mocap=True)
-        body.add_geom(
-            name="object_geom",
-            type=mujoco.mjtGeom.mjGEOM_MESH,
-            meshname=mesh.name,
-            mass=1.0,
-            rgba=(0.0, 0.8, 0.3, 1.0),
-            friction=(1.0, 0.005, 0.0001),
-        )
-        return spec
-
-    return spec_fn
-
-
 def _make_hoi_entities(*, include_reference: bool = False) -> dict[str, EntityCfg]:
-    entities: dict[str, EntityCfg] = {
-        "robot": deepcopy(G1_CFG),
-    }
-    if include_reference:
-        robot_reference = deepcopy(G1_CFG)
-        # Keep reference robot visible but remove all physical contacts to avoid launch/jitter artifacts.
-        robot_reference.collisions = (
-            CollisionCfg(
-                geom_names_expr=(".*",),
-                contype=0,
-                conaffinity=0,
-            ),
-        )
-        entities["robot_reference"] = robot_reference
-    for object_name, mesh_file_path in MESH_FILE_PATHS.items():
-        entities[object_name] = EntityCfg(
-            spec_fn=_make_mesh_object_spec(mesh_file_path, MESH_FILE_SCALES[object_name]),
-        )
-    return entities
+    """Build entity dict from the HOI catalog (catalog-driven)."""
+    return make_hoi_variant_entities(
+        _HOI_CATALOG,
+        include_reference=include_reference,
+        robot_cfg=G1_CFG,
+    )
 
 
 @dataclass(kw_only=True)
@@ -152,7 +140,7 @@ motion_reference_cfg = MotionReferenceManagerCfg(
     robot_model_path=G1_MJCF_PATH,
     data_class_type=HoiMotionReferenceData,
     state_class_type=HoiMotionReferenceState,
-    scene_object_names=list(MESH_FILE_PATHS.keys()),
+    scene_object_names=_HOI_CATALOG.object_types,
     link_of_interests=[
         "pelvis",
         "torso_link",
@@ -241,6 +229,54 @@ class G1PerceptiveHoiShadowingEnvCfg(perceptual_cfg.PerceptiveHoiShadowingEnvCfg
         # HOI task does not use terrain constraints.
         self.terminations["out_of_border"] = None
 
+        # ------------------------------------------------------------------
+        # Object domain randomization (always active)
+        # ------------------------------------------------------------------
+        object_dr = perceptual_cfg.make_hoi_object_dr_events(
+            object_names=_HOI_CATALOG.variant_names,
+        )
+        self.events.update(object_dr)
+
+        # ------------------------------------------------------------------
+        # Multi-variant mode: variant switching + curriculum
+        # ------------------------------------------------------------------
+        if _enable_multi_variant:
+            self.events["reset_rigid_objects_state_by_reference"] = EventTermCfg(
+                func=reset_object_variant_by_reference,
+                mode="reset",
+                params={
+                    "object_entity_names": _HOI_CATALOG.variant_names,
+                    "catalog": _HOI_CATALOG,
+                    "scale_distribution_params": (0.8, 1.2),
+                    "precision_scale_range": (0.8, 1.4),
+                },
+            )
+            self.events["update_rigid_objects_state_by_reference"] = EventTermCfg(
+                func=update_object_variant_by_reference,
+                mode="interval",
+                interval_range_s=(0.02, 0.02),
+                params={
+                    "object_entity_names": _HOI_CATALOG.variant_names,
+                    "invalid_object_pos": (0.0, 0.0, -100.0),
+                },
+            )
+            # NOTE: alpha curriculum is disabled because HOI variants do not
+            # carry alpha-morph data (all are alpha=1.0).  Enable only when
+            # variant meshes with multiple alpha values are available.
+            # Scale curriculum adjusts the scale-distribution range seen by
+            # the reset event, but does NOT physically scale meshes (MJ
+            # mocap bodies lack runtime scale).  It is still useful as
+            # reward-precision randomization.
+            self.curriculum["object_scale_curriculum"] = CurriculumTermCfg(
+                func=ObjectScaleCurriculum,
+                params={
+                    "initial_scale_range": (0.95, 1.05),
+                    "final_scale_range": (0.8, 1.2),
+                    "start_step": 0,
+                    "end_step": 1_000_000,
+                },
+            )
+
 
 @dataclass(kw_only=True)
 class G1PerceptiveHoiShadowingEnvCfg_PLAY(G1PerceptiveHoiShadowingEnvCfg):
@@ -302,10 +338,15 @@ class G1PerceptiveHoiShadowingEnvCfg_PLAY(G1PerceptiveHoiShadowingEnvCfg):
         motion_reference_cfg.visualizing_robot_offset = (0.0, 0.0, 0.0)
         self.viewer.entity_name = "robot_reference"
 
-        # remove some randomizations
+        # remove some randomizations (robot DR)
         self.events["add_joint_default_pos"] = None
         self.events["base_com"] = None
         self.events["physics_material"] = None
+
+        # remove object DR events
+        for key in list(self.events.keys()):
+            if key.startswith("object_friction_") or key.startswith("object_com_"):
+                self.events[key] = None
         self.events["reset_robot"].params["randomize_pose_range"]["x"] = [0.0] * 2  # (+-0.6)
         self.events["reset_robot"].params["randomize_pose_range"]["y"] = [0.0] * 2  # (+-0.6)
         self.events["reset_robot"].params["randomize_pose_range"]["z"] = (0.0, 0.0)

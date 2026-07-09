@@ -6,8 +6,6 @@ import argparse
 import os
 from pathlib import Path
 
-from instinct_mj.tasks.interaction.mdp.part2link import _alpha_to_glb_name, _alpha_to_token
-
 _PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.realpath(__file__)))))
 _DATA_DIR = os.path.join(_PROJECT_ROOT, "data", "datasets", "interaction")
 DEFAULT_DATASET_ROOT = os.path.join(_DATA_DIR, "output_npz_29dof_with_object")
@@ -33,6 +31,7 @@ DEFAULT_CHAIRS = (
     "chair_51",
     "chair_55",
 )
+DEFAULT_ALPHAS = "1.0,0.8,0.5,0.0"
 
 
 def _parse_csv(raw: str | None, default: tuple[str, ...]) -> tuple[str, ...]:
@@ -47,6 +46,14 @@ def _parse_alphas(raw: str) -> tuple[float, ...]:
     if not values:
         raise ValueError("--alphas must contain at least one value")
     return values
+
+
+def _alpha_to_token(alpha: float) -> str:
+    return f"alpha_{float(alpha):.2f}".replace(".", "p")
+
+
+def _alpha_to_glb_name(alpha: float) -> str:
+    return f"alpha_{float(alpha):.2f}.glb"
 
 
 def _export_glb_to_obj(src: Path, dst: Path) -> None:
@@ -75,7 +82,7 @@ def main() -> int:
         default=os.getenv("INSTINCT_PART2LINK_ASSET_CACHE", "~/.cache/instinct_mj/part2link_assets"),
     )
     parser.add_argument("--chairs", default=os.getenv("SITTING_PART2LINK_CHAIR_NAMES", ",".join(DEFAULT_CHAIRS)))
-    parser.add_argument("--alphas", default=os.getenv("SITTING_PART2LINK_ALPHA_VALUES", "1.0"))
+    parser.add_argument("--alphas", default=os.getenv("SITTING_PART2LINK_ALPHA_VALUES", DEFAULT_ALPHAS))
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -101,4 +108,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

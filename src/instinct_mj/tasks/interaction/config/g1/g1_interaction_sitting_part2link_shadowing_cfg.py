@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from copy import deepcopy
 from dataclasses import dataclass, field
+from pathlib import Path
 
 import mujoco
 from mjlab.entity import EntityCfg
@@ -42,6 +43,7 @@ PART2LINK_METADATA_YAML = os.path.join(PART2LINK_DATASET_ROOT, "metadata.yaml")
 PART2LINK_METADATA_ROOT = os.path.join(PART2LINK_DATASET_ROOT, "sparse_contact_maps")
 SITTING_EXTENSION_ROOT = os.path.join(PART2LINK_DATASET_ROOT, "sofa_exntend_obj")
 SITTING_ASSET_CACHE = os.getenv("INSTINCT_PART2LINK_ASSET_CACHE")
+SITTING_COLLISION_CACHE = os.getenv("INSTINCT_PART2LINK_COLLISION_CACHE")
 SITTING_PART2LINK_ENV_SPACING = 8.0
 SITTING_VARIANT_SCALE_RANGE = (0.8, 1.2)
 SITTING_VARIANT_PRECISION_SCALE_RANGE = (0.8, 1.4)
@@ -120,9 +122,11 @@ def _parse_alpha_values(value: str | None, default: tuple[float, ...]) -> tuple[
     return parsed or default
 
 
-SITTING_VARIANT_RAW_ALPHA_VALUES = _parse_alpha_values(os.getenv("SITTING_PART2LINK_ALPHA_VALUES"), (1.0,))
-SITTING_VARIANT_STAGE_ALPHA = SITTING_VARIANT_RAW_ALPHA_VALUES[-1]
-SITTING_VARIANT_ALPHA_VALUES = (SITTING_VARIANT_STAGE_ALPHA,)
+SITTING_VARIANT_ALPHA_VALUES = _parse_alpha_values(
+    os.getenv("SITTING_PART2LINK_ALPHA_VALUES"),
+    (1.0, 0.8, 0.5, 0.0),
+)
+SITTING_VARIANT_ALPHA_LABEL = "_".join(f"{alpha:.2f}".replace(".", "p") for alpha in SITTING_VARIANT_ALPHA_VALUES)
 SITTING_VARIANT_CHAIR_NAMES = _parse_csv(
     os.getenv("SITTING_PART2LINK_CHAIR_NAMES"),
     SITTING_VARIANT_CHAIR_NAMES_DEFAULT,
@@ -136,6 +140,7 @@ def _load_stage_catalog():
         alpha_values=SITTING_VARIANT_ALPHA_VALUES,
         asset_cache=SITTING_ASSET_CACHE,
         device="cpu",
+        single_object_type="box",
     )
 
 
@@ -158,19 +163,65 @@ def _make_g1_part2link_scene_sensors(*, motion_reference) -> tuple:
     return tuple(sensors)
 
 
-def _make_part2link_object_spec(mesh_file_path: str):
+def _resolve_part2link_collision_assets(variant) -> tuple[str | None, tuple[str, ...]]:
+    if not SITTING_COLLISION_CACHE:
+        return None, tuple()
+    collision_dir = Path(SITTING_COLLISION_CACHE).expanduser().resolve() / variant.name
+    visual_path = collision_dir / "visual.obj"
+    if not visual_path.exists():
+        raise FileNotFoundError(
+            f"Missing CoACD visual mesh for {variant.name}. Expected {visual_path}."
+        )
+    collision_paths = tuple(str(path) for path in sorted(collision_dir.glob("collision_*.obj")))
+    if not collision_paths:
+        raise FileNotFoundError(
+            f"Missing CoACD collision meshes for {variant.name}. "
+            f"Expected files matching {collision_dir / 'collision_*.obj'}."
+        )
+    return str(visual_path), collision_paths
+
+
+def _make_part2link_object_spec(mesh_file_path: str, collision_mesh_file_paths: tuple[str, ...] = tuple()):
     def spec_fn() -> mujoco.MjSpec:
         spec = mujoco.MjSpec()
         mesh = spec.add_mesh(name="object_mesh", file=os.path.expanduser(mesh_file_path), scale=(1.0, 1.0, 1.0))
         body = spec.worldbody.add_body(name="object", mocap=True)
-        body.add_geom(
-            name="object_geom",
-            type=mujoco.mjtGeom.mjGEOM_MESH,
-            meshname=mesh.name,
-            mass=1.0,
-            rgba=(0.2, 0.55, 0.85, 1.0),
-            friction=(1.0, 0.005, 0.0001),
-        )
+        if collision_mesh_file_paths:
+            body.add_geom(
+                name="object_visual",
+                type=mujoco.mjtGeom.mjGEOM_MESH,
+                meshname=mesh.name,
+                contype=0,
+                conaffinity=0,
+                density=0.0,
+                group=2,
+                rgba=(0.2, 0.55, 0.85, 1.0),
+            )
+            mass_per_collision = 1.0 / len(collision_mesh_file_paths)
+            for index, collision_mesh_file_path in enumerate(collision_mesh_file_paths):
+                collision_mesh = spec.add_mesh(
+                    name=f"object_collision_mesh_{index:03d}",
+                    file=os.path.expanduser(collision_mesh_file_path),
+                    scale=(1.0, 1.0, 1.0),
+                )
+                body.add_geom(
+                    name=f"object_collision_{index:03d}",
+                    type=mujoco.mjtGeom.mjGEOM_MESH,
+                    meshname=collision_mesh.name,
+                    mass=mass_per_collision,
+                    group=3,
+                    rgba=(1.0, 0.55, 0.05, 0.35),
+                    friction=(1.0, 0.005, 0.0001),
+                )
+        else:
+            body.add_geom(
+                name="object_geom",
+                type=mujoco.mjtGeom.mjGEOM_MESH,
+                meshname=mesh.name,
+                mass=1.0,
+                rgba=(0.2, 0.55, 0.85, 1.0),
+                friction=(1.0, 0.005, 0.0001),
+            )
         return spec
 
     return spec_fn
@@ -192,7 +243,13 @@ def _make_part2link_entities(*, include_reference: bool = False) -> dict[str, En
         entities["robot_reference"] = robot_reference
 
     for variant in _load_stage_catalog().variants:
-        entities[variant.name] = EntityCfg(spec_fn=_make_part2link_object_spec(str(variant.mesh_path)))
+        visual_mesh_path, collision_mesh_paths = _resolve_part2link_collision_assets(variant)
+        entities[variant.name] = EntityCfg(
+            spec_fn=_make_part2link_object_spec(
+                visual_mesh_path or str(variant.mesh_path),
+                collision_mesh_paths,
+            )
+        )
     return entities
 
 
@@ -390,17 +447,15 @@ def make_part2link_rewards():
 def make_part2link_events():
     events = perceptual_cfg.make_hoi_events()
     object_entities = _part2link_object_entity_names()
+    part2link_catalog = _load_stage_catalog()
     events["reset_rigid_objects_state_by_reference"] = EventTermCfg(
         func=interaction_mdp.reset_object_variant_by_reference,
         mode="reset",
         params={
             "object_entity_names": object_entities,
+            "catalog": part2link_catalog,
             "motion_ref_cfg": SceneEntityCfg("motion_reference"),
             "object_name": "box",
-            "extension_root": SITTING_EXTENSION_ROOT,
-            "chair_names": SITTING_VARIANT_CHAIR_NAMES,
-            "alpha_values": SITTING_VARIANT_ALPHA_VALUES,
-            "asset_cache": SITTING_ASSET_CACHE,
             "scale_distribution_params": SITTING_VARIANT_SCALE_RANGE,
             "precision_scale_range": SITTING_VARIANT_PRECISION_SCALE_RANGE,
             "base_lin_vel_ratio": 1.0,
@@ -497,8 +552,8 @@ class G1InteractionSittingPart2LinkShadowingEnvCfg(perceptual_cfg.PerceptiveHoiS
         )
         robot_cfg.articulation.actuators = beyondmimic_g1_29dof_actuator_cfgs
         self.actions["joint_pos"].scale = beyondmimic_action_scale
-        self.sim.njmax = 900
-        self.sim.nconmax = 256
+        self.sim.njmax = None
+        self.sim.nconmax = None
         self.sim.mujoco.jacobian = "sparse"
         self.scene.env_spacing = SITTING_PART2LINK_ENV_SPACING
         self.rewards["undesired_contacts"] = None
@@ -514,7 +569,7 @@ class G1InteractionSittingPart2LinkShadowingEnvCfg(perceptual_cfg.PerceptiveHoiS
         self.run_name = "G1InteractionSittingPart2LinkShadowing" + "".join(
             [
                 "_alphaObjectPart2Link",
-                f"_alpha{SITTING_VARIANT_STAGE_ALPHA:.2f}".replace(".", "p"),
+                f"_alphas{SITTING_VARIANT_ALPHA_LABEL}",
                 (
                     "_concatMotionBins"
                     if motion_buffer.env_starting_stub_sampling_strategy == "concat_motion_bins"

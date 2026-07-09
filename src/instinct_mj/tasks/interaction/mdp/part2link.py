@@ -15,6 +15,41 @@ from mjlab.utils.lab_api import math as math_utils
 from instinct_mj.monitors.monitor_manager import MonitorTerm
 import instinct_mj.utils.math as instinct_math
 
+# ---------------------------------------------------------------------------
+# Shared variant types (canonical definitions in object_variant.py).
+# ---------------------------------------------------------------------------
+from instinct_mj.envs.mdp.events.object_variant import (  # noqa: F401
+    ObjectVariant,
+    ObjectVariantCatalog,
+    ObjectVariantRuntimeState,
+    _CATALOG_CACHE,
+    _INACTIVE_OBJECT_SPACING,
+    _active_object_state_w,
+    _alpha_to_glb_name,
+    _alpha_to_token,
+    _get_or_create_variant_state,
+    _inactive_pose,
+    _invalidate_dynamic_mesh_sensors,
+    _parse_alpha_values,
+    _parse_object_type_names,
+    _read_part_names,
+    _resolve_mesh_path,
+    _resolve_object_dirs,
+    _root_ang_vel,
+    _root_lin_vel,
+    _root_pos,
+    _root_quat,
+    _safe_unit_quat,
+    _sanitize_variant_name,
+    _scene_object_slot,
+    _select_variants_for_reset,
+    _update_active_variant_state,
+    _write_pose_velocity,
+    load_object_variant_catalog,
+    reset_object_variant_by_reference,
+    update_object_variant_by_reference,
+)
+
 if TYPE_CHECKING:
     from mjlab.envs import ManagerBasedEnv, ManagerBasedRlEnv
     from mjlab.managers import CurriculumTermCfg
@@ -22,43 +57,43 @@ if TYPE_CHECKING:
     from instinct_mj.motion_reference import Part2LinkMotionReferenceData
     from instinct_mj.motion_reference.motion_reference_manager import MotionReferenceManager
 
+# Shared type & function aliases (canonical definitions in object_variant.py).
+# Re-import so this module's public API stays stable for callers that import
+# from ``instinct_mj.tasks.interaction.mdp``.
+from instinct_mj.envs.mdp.events.object_variant import (  # noqa: F811
+    ObjectVariant,
+    ObjectVariantCatalog,
+    ObjectVariantRuntimeState,
+    _CATALOG_CACHE,
+    _INACTIVE_OBJECT_SPACING,
+    _active_object_state_w,
+    _alpha_to_glb_name,
+    _alpha_to_token,
+    _get_or_create_variant_state,
+    _inactive_pose,
+    _invalidate_dynamic_mesh_sensors,
+    _parse_alpha_values,
+    _parse_object_type_names as _parse_chair_names,
+    _read_part_names,
+    _resolve_mesh_path,
+    _resolve_object_dirs as _resolve_chair_dirs,
+    _root_ang_vel,
+    _root_lin_vel,
+    _root_pos,
+    _root_quat,
+    _safe_unit_quat,
+    _sanitize_variant_name,
+    _scene_object_slot,
+    _select_variants_for_reset,
+    _update_active_variant_state,
+    _write_pose_velocity,
+    load_object_variant_catalog,
+    reset_object_variant_by_reference,
+    update_object_variant_by_reference,
+    _squeeze_type_dim,
+)
 
-@dataclass(frozen=True)
-class ObjectVariant:
-    name: str
-    chair_name: str
-    alpha: float
-    mesh_path: Path
-    contact_points_path: Path
-    alpha_index: int
-
-
-@dataclass
-class ObjectVariantCatalog:
-    variants: list[ObjectVariant]
-    centers_local: torch.Tensor
-    points_local: torch.Tensor
-    point_valid_mask: torch.Tensor
-    part_names: list[str]
-    chair_names: list[str]
-    variant_names: list[str]
-
-
-@dataclass
-class ObjectVariantRuntimeState:
-    catalog: ObjectVariantCatalog
-    active_variant_ids: torch.Tensor
-    active_alpha: torch.Tensor
-    active_scale: torch.Tensor
-    active_precision_scale: torch.Tensor
-    active_centers_local: torch.Tensor
-    active_points_local: torch.Tensor
-    active_point_valid_mask: torch.Tensor
-    reference_position_offsets: torch.Tensor
-
-
-_CATALOG_CACHE: dict[tuple[str, str | None, tuple[str, ...] | None, tuple[float, ...]], ObjectVariantCatalog] = {}
-_INACTIVE_OBJECT_SPACING = 20.0
+# Part2Link-specific body/part aliases (not in shared module).
 _BODY_ALIAS = {
     "left_rubber_hand_link": "left_rubber_hand",
     "right_rubber_hand_link": "right_rubber_hand",
@@ -67,475 +102,6 @@ _PART_ALIAS = {
     "arm_left": "armrest_left",
     "arm_right": "armrest_right",
 }
-
-
-def _alpha_to_token(alpha: float) -> str:
-    return f"alpha_{float(alpha):.2f}".replace(".", "p")
-
-
-def _alpha_to_glb_name(alpha: float) -> str:
-    return f"alpha_{float(alpha):.2f}.glb"
-
-
-def _sanitize_variant_name(chair_name: str, alpha: float) -> str:
-    return f"{chair_name}_{_alpha_to_token(alpha)}".replace("-", "_").replace(".", "p")
-
-
-def _parse_chair_names(value: str | Sequence[str] | None) -> tuple[str, ...] | None:
-    if value is None:
-        return None
-    if isinstance(value, str):
-        names = tuple(item.strip() for item in value.split(",") if item.strip())
-        return names or None
-    names = tuple(str(item) for item in value if str(item))
-    return names or None
-
-
-def _parse_alpha_values(value: str | Sequence[float] | None, default: Sequence[float]) -> tuple[float, ...]:
-    if value is None:
-        return tuple(float(alpha) for alpha in default)
-    if isinstance(value, str):
-        alphas = tuple(float(item.strip()) for item in value.split(",") if item.strip())
-        return alphas or tuple(float(alpha) for alpha in default)
-    return tuple(float(alpha) for alpha in value)
-
-
-def _resolve_chair_dirs(extension_root: str | Path, chair_names: Sequence[str] | None) -> list[Path]:
-    root = Path(extension_root).expanduser().resolve()
-    if chair_names is None or len(chair_names) == 0:
-        candidates = sorted(path for path in root.iterdir() if path.is_dir())
-    else:
-        candidates = [(root / str(name)).resolve() for name in chair_names]
-    chair_dirs = [
-        path
-        for path in candidates
-        if (path / "ffd_bbox_coarse" / "morph_path").is_dir()
-        and (path / "contact_point_transfer" / "contact_points_local.npz").exists()
-    ]
-    if not chair_dirs:
-        raise FileNotFoundError(f"No valid Part2Link chair variants found under extension_root={root}")
-    return chair_dirs
-
-
-def _resolve_mesh_path(chair_dir: Path, alpha: float, asset_cache: str | Path | None) -> Path:
-    if asset_cache is not None:
-        cache_dir = Path(asset_cache).expanduser().resolve() / chair_dir.name
-        cache_candidates = [
-            cache_dir / f"{_alpha_to_token(alpha)}.obj",
-            cache_dir / f"{_alpha_to_glb_name(alpha)}.obj",
-            cache_dir / "mesh.obj",
-        ]
-        for candidate in cache_candidates:
-            if candidate.exists():
-                return candidate
-
-    morph_dir = chair_dir / "ffd_bbox_coarse" / "morph_path"
-    glb_path = morph_dir / _alpha_to_glb_name(alpha)
-    if glb_path.exists():
-        return glb_path.resolve()
-
-    usd_path = morph_dir / f"{_alpha_to_token(alpha)}.usd"
-    if usd_path.exists():
-        return usd_path.resolve()
-
-    raise FileNotFoundError(f"No mesh found for chair={chair_dir.name}, alpha={alpha:.2f} under {morph_dir}")
-
-
-def _read_part_names(contact_data: np.lib.npyio.NpzFile, num_parts: int) -> list[str]:
-    for key in ("points_names", "part_names", "parts_names"):
-        if key in contact_data:
-            return [str(item) for item in contact_data[key].tolist()]
-    return [f"part_{idx}" for idx in range(num_parts)]
-
-
-def load_object_variant_catalog(
-    extension_root: str | Path,
-    chair_names: Sequence[str] | str | None = None,
-    alpha_values: Sequence[float] | str | None = None,
-    asset_cache: str | Path | None = None,
-    device: str | torch.device = "cpu",
-) -> ObjectVariantCatalog:
-    parsed_chairs = _parse_chair_names(chair_names)
-    parsed_alphas = _parse_alpha_values(alpha_values, default=(1.0,))
-    cache_key = (
-        str(Path(extension_root).expanduser().resolve()),
-        str(Path(asset_cache).expanduser().resolve()) if asset_cache is not None else None,
-        parsed_chairs,
-        parsed_alphas,
-    )
-    if cache_key in _CATALOG_CACHE:
-        catalog = _CATALOG_CACHE[cache_key]
-        if catalog.centers_local.device == torch.device(device):
-            return catalog
-
-    variants: list[ObjectVariant] = []
-    centers: list[np.ndarray] = []
-    points: list[np.ndarray] = []
-    point_masks: list[np.ndarray] = []
-    chair_name_values: list[str] = []
-    variant_names: list[str] = []
-    part_names: list[str] | None = None
-
-    for chair_dir in _resolve_chair_dirs(extension_root, parsed_chairs):
-        contact_path = chair_dir / "contact_point_transfer" / "contact_points_local.npz"
-        contact_data = np.load(contact_path, allow_pickle=True)
-        contact_alphas = np.asarray(contact_data["alpha_values"], dtype=np.float32).reshape(-1)
-        points_local = np.asarray(contact_data["points_local"], dtype=np.float32)
-        centers_local = np.asarray(contact_data["center_local"], dtype=np.float32)
-        if points_local.ndim != 4 or centers_local.ndim != 3:
-            raise ValueError(
-                f"Expected alpha-indexed contact points in {contact_path}, "
-                f"got points={points_local.shape}, centers={centers_local.shape}"
-            )
-        if part_names is None:
-            part_names = _read_part_names(contact_data, centers_local.shape[1])
-
-        for target_alpha in parsed_alphas:
-            alpha_idx = int(np.argmin(np.abs(contact_alphas - float(target_alpha))))
-            alpha = float(contact_alphas[alpha_idx])
-            if abs(alpha - float(target_alpha)) > 1.0e-4:
-                warnings.warn(
-                    f"Requested alpha={target_alpha:.2f} for {chair_dir.name}, using nearest alpha={alpha:.2f}.",
-                    stacklevel=2,
-                )
-            mesh_path = _resolve_mesh_path(chair_dir, alpha, asset_cache)
-            variant_name = _sanitize_variant_name(chair_dir.name, alpha)
-            variants.append(
-                ObjectVariant(
-                    name=variant_name,
-                    chair_name=chair_dir.name,
-                    alpha=alpha,
-                    mesh_path=mesh_path,
-                    contact_points_path=contact_path.resolve(),
-                    alpha_index=alpha_idx,
-                )
-            )
-            centers.append(np.nan_to_num(centers_local[alpha_idx]).astype(np.float32))
-            points.append(np.nan_to_num(points_local[alpha_idx]).astype(np.float32))
-            point_masks.append(np.isfinite(points_local[alpha_idx]).all(axis=-1))
-            chair_name_values.append(chair_dir.name)
-            variant_names.append(variant_name)
-
-    if not variants:
-        raise FileNotFoundError(f"No Part2Link alpha variants found under extension_root={extension_root}")
-
-    catalog = ObjectVariantCatalog(
-        variants=variants,
-        centers_local=torch.as_tensor(np.stack(centers), dtype=torch.float32, device=device),
-        points_local=torch.as_tensor(np.stack(points), dtype=torch.float32, device=device),
-        point_valid_mask=torch.as_tensor(np.stack(point_masks), dtype=torch.bool, device=device),
-        part_names=part_names or [],
-        chair_names=chair_name_values,
-        variant_names=variant_names,
-    )
-    _CATALOG_CACHE[cache_key] = catalog
-    return catalog
-
-
-def _get_or_create_variant_state(
-    env: ManagerBasedEnv,
-    extension_root: str | Path,
-    chair_names: Sequence[str] | str | None = None,
-    alpha_values: Sequence[float] | str | None = None,
-    asset_cache: str | Path | None = None,
-) -> ObjectVariantRuntimeState:
-    state = getattr(env, "_part2link_object_variant_state", None)
-    if state is not None:
-        return state
-
-    catalog = load_object_variant_catalog(
-        extension_root,
-        chair_names=chair_names,
-        alpha_values=alpha_values,
-        asset_cache=asset_cache,
-        device=env.device,
-    )
-    num_envs = env.num_envs
-    num_parts = catalog.centers_local.shape[1]
-    num_points = catalog.points_local.shape[2]
-    state = ObjectVariantRuntimeState(
-        catalog=catalog,
-        active_variant_ids=torch.zeros(num_envs, dtype=torch.long, device=env.device),
-        active_alpha=torch.zeros(num_envs, dtype=torch.float32, device=env.device),
-        active_scale=torch.ones(num_envs, dtype=torch.float32, device=env.device),
-        active_precision_scale=torch.ones(num_envs, dtype=torch.float32, device=env.device),
-        active_centers_local=torch.zeros(num_envs, num_parts, 3, dtype=torch.float32, device=env.device),
-        active_points_local=torch.zeros(num_envs, num_parts, num_points, 3, dtype=torch.float32, device=env.device),
-        active_point_valid_mask=torch.zeros(num_envs, num_parts, num_points, dtype=torch.bool, device=env.device),
-        reference_position_offsets=torch.zeros(num_envs, 3, dtype=torch.float32, device=env.device),
-    )
-    env._part2link_object_variant_state = state
-    env._interaction_object_variant_state = state
-    return state
-
-
-def _safe_unit_quat(quat: torch.Tensor) -> torch.Tensor:
-    quat = torch.nan_to_num(quat, nan=0.0, posinf=0.0, neginf=0.0)
-    norm = torch.linalg.vector_norm(quat, dim=-1, keepdim=True)
-    normalized = quat / torch.clamp(norm, min=1.0e-6)
-    identity = torch.zeros_like(normalized)
-    identity[..., 0] = 1.0
-    return torch.where((norm > 1.0e-6).expand_as(normalized), normalized, identity)
-
-
-def _root_pos(asset) -> torch.Tensor:
-    data = asset.data
-    for name in ("root_link_pos_w", "root_pos_w"):
-        if hasattr(data, name):
-            return torch.nan_to_num(getattr(data, name), nan=0.0, posinf=0.0, neginf=0.0)
-    raise AttributeError(f"Entity '{getattr(asset, 'name', '<unknown>')}' has no root position tensor.")
-
-
-def _root_quat(asset) -> torch.Tensor:
-    data = asset.data
-    for name in ("root_link_quat_w", "root_quat_w"):
-        if hasattr(data, name):
-            return _safe_unit_quat(getattr(data, name))
-    raise AttributeError(f"Entity '{getattr(asset, 'name', '<unknown>')}' has no root orientation tensor.")
-
-
-def _root_lin_vel(asset) -> torch.Tensor:
-    data = asset.data
-    for name in ("root_link_lin_vel_w", "root_lin_vel_w"):
-        if hasattr(data, name):
-            return torch.nan_to_num(getattr(data, name), nan=0.0, posinf=0.0, neginf=0.0)
-    return torch.zeros_like(_root_pos(asset))
-
-
-def _root_ang_vel(asset) -> torch.Tensor:
-    data = asset.data
-    for name in ("root_link_ang_vel_w", "root_ang_vel_w"):
-        if hasattr(data, name):
-            return torch.nan_to_num(getattr(data, name), nan=0.0, posinf=0.0, neginf=0.0)
-    return torch.zeros_like(_root_pos(asset))
-
-
-def _write_pose_velocity(asset, root_pose: torch.Tensor, root_velocity: torch.Tensor, env_ids: torch.Tensor) -> None:
-    if getattr(asset, "is_fixed_base", False):
-        if not getattr(asset, "is_mocap", False):
-            raise ValueError("Part2Link object entities must be mocap or free bodies.")
-        asset.write_mocap_pose_to_sim(root_pose, env_ids=env_ids)
-        return
-    asset.write_root_link_pose_to_sim(root_pose, env_ids=env_ids)
-    asset.write_root_link_velocity_to_sim(root_velocity, env_ids=env_ids)
-
-
-def _scene_object_slot(motion_ref: MotionReferenceManager, object_name: str) -> int:
-    scene_object_names = getattr(motion_ref.cfg, "scene_object_names", None)
-    if not scene_object_names:
-        return 0
-    if object_name in scene_object_names:
-        return int(scene_object_names.index(object_name))
-    warnings.warn(
-        f"Object name '{object_name}' is not in motion_ref.scene_object_names={scene_object_names}; using slot 0.",
-        stacklevel=2,
-    )
-    return 0
-
-
-def _inactive_pose(
-    env_ids: torch.Tensor,
-    variant_index: int,
-    env_origins: torch.Tensor | None,
-    dtype: torch.dtype,
-    device: torch.device,
-) -> torch.Tensor:
-    row = variant_index // 32
-    col = variant_index % 32
-    pose = torch.zeros(env_ids.numel(), 7, dtype=dtype, device=device)
-    if env_origins is not None:
-        pose[:, 0] = env_origins[env_ids, 0].to(device=device, dtype=dtype)
-        pose[:, 1] = env_origins[env_ids, 1].to(device=device, dtype=dtype)
-        pose[:, 2] = env_origins[env_ids, 2].to(device=device, dtype=dtype)
-    pose[:, 0] += float(col) * _INACTIVE_OBJECT_SPACING
-    pose[:, 1] += float(row) * _INACTIVE_OBJECT_SPACING
-    pose[:, 2] -= 100.0
-    pose[:, 3] = 1.0
-    return pose
-
-
-def _select_variants_for_reset(state: ObjectVariantRuntimeState, num_reset: int, device: torch.device) -> torch.Tensor:
-    chair_order = sorted(set(state.catalog.chair_names))
-    chair_ids = torch.randint(len(chair_order), (num_reset,), device=device)
-    selected: list[int] = []
-    for chair_id in chair_ids.detach().cpu().tolist():
-        chair_name = chair_order[int(chair_id)]
-        candidates = [idx for idx, variant in enumerate(state.catalog.variants) if variant.chair_name == chair_name]
-        if not candidates:
-            raise RuntimeError(f"No Part2Link variant for chair '{chair_name}'.")
-        selected.append(candidates[0])
-    return torch.tensor(selected, dtype=torch.long, device=device)
-
-
-def _update_active_variant_state(
-    state: ObjectVariantRuntimeState,
-    env_ids: torch.Tensor,
-    variant_ids: torch.Tensor,
-    scales: torch.Tensor,
-    precision_scales: torch.Tensor,
-    reference_position_offsets: torch.Tensor,
-) -> None:
-    state.active_variant_ids[env_ids] = variant_ids
-    state.active_alpha[env_ids] = torch.tensor(
-        [state.catalog.variants[int(idx)].alpha for idx in variant_ids.detach().cpu().tolist()],
-        dtype=torch.float32,
-        device=env_ids.device,
-    )
-    state.active_scale[env_ids] = scales
-    state.active_precision_scale[env_ids] = precision_scales
-    state.active_centers_local[env_ids] = state.catalog.centers_local[variant_ids] * scales[:, None, None]
-    state.active_points_local[env_ids] = state.catalog.points_local[variant_ids] * scales[:, None, None, None]
-    state.active_point_valid_mask[env_ids] = state.catalog.point_valid_mask[variant_ids]
-    state.reference_position_offsets[env_ids] = reference_position_offsets
-
-
-def _invalidate_dynamic_mesh_sensors(env: ManagerBasedEnv) -> None:
-    for sensor in getattr(env.scene, "sensors", {}).values():
-        if hasattr(sensor, "invalidate_mesh_buffers"):
-            sensor.invalidate_mesh_buffers()
-
-
-def reset_object_variant_by_reference(
-    env: ManagerBasedEnv,
-    env_ids: torch.Tensor,
-    object_entity_names: Sequence[str],
-    motion_ref_cfg: SceneEntityCfg = SceneEntityCfg("motion_reference"),
-    object_name: str = "box",
-    extension_root: str | Path = "",
-    chair_names: Sequence[str] | str | None = None,
-    alpha_values: Sequence[float] | str | None = None,
-    asset_cache: str | Path | None = None,
-    scale_distribution_params: tuple[float, float] = (1.0, 1.0),
-    precision_scale_range: tuple[float, float] = (0.8, 1.4),
-    base_lin_vel_ratio: float = 1.0,
-    base_ang_vel_ratio: float = 1.0,
-    apply_env_spacing: bool = False,
-) -> None:
-    motion_ref: MotionReferenceManager = env.scene[motion_ref_cfg.name]
-    state = _get_or_create_variant_state(env, extension_root, chair_names, alpha_values, asset_cache)
-    env_ids = env_ids.to(device=env.device, dtype=torch.long)
-    num_reset = int(env_ids.numel())
-    if num_reset == 0:
-        return
-
-    init_state = motion_ref.get_init_reference_state(env_ids)
-    object_slot = _scene_object_slot(motion_ref, object_name)
-    object_pos = init_state.object_pos_w[:, object_slot].clone()
-    object_quat = _safe_unit_quat(init_state.object_quat_w[:, object_slot])
-    lin_vel = init_state.object_lin_vel_w[:, object_slot] * float(base_lin_vel_ratio)
-    ang_vel = init_state.object_ang_vel_w[:, object_slot] * float(base_ang_vel_ratio)
-    reference_offsets = torch.zeros_like(object_pos)
-    env_origins = getattr(env.scene, "env_origins", None)
-    if apply_env_spacing and env_origins is not None:
-        offsets = env_origins[env_ids].to(device=env.device, dtype=object_pos.dtype)
-        object_pos = object_pos + offsets
-        reference_offsets = offsets
-
-    variant_ids = _select_variants_for_reset(state, num_reset, torch.device(env.device))
-    scale_min, scale_max = scale_distribution_params
-    if scale_max > scale_min:
-        scales = torch.empty(num_reset, dtype=torch.float32, device=env.device).uniform_(scale_min, scale_max)
-    else:
-        scales = torch.ones(num_reset, dtype=torch.float32, device=env.device) * float(scale_min)
-    precision_scales = torch.empty(num_reset, dtype=torch.float32, device=env.device).uniform_(*precision_scale_range)
-
-    root_pose = torch.cat([object_pos, object_quat], dim=-1)
-    root_velocity = torch.cat([lin_vel, ang_vel], dim=-1)
-    zero_velocity = torch.zeros_like(root_velocity)
-    for variant_index, entity_name in enumerate(object_entity_names):
-        asset = env.scene[entity_name]
-        active_mask = variant_ids == variant_index
-        if active_mask.any():
-            _write_pose_velocity(asset, root_pose[active_mask], root_velocity[active_mask], env_ids[active_mask])
-        inactive_mask = ~active_mask
-        if inactive_mask.any():
-            inactive_pose = _inactive_pose(
-                env_ids[inactive_mask],
-                variant_index,
-                env_origins,
-                root_pose.dtype,
-                root_pose.device,
-            )
-            _write_pose_velocity(asset, inactive_pose, zero_velocity[inactive_mask], env_ids[inactive_mask])
-
-    _update_active_variant_state(
-        state,
-        env_ids=env_ids,
-        variant_ids=variant_ids,
-        scales=scales,
-        precision_scales=precision_scales,
-        reference_position_offsets=reference_offsets,
-    )
-    _invalidate_dynamic_mesh_sensors(env)
-
-
-def update_object_variant_by_reference(
-    env: ManagerBasedEnv,
-    env_ids: torch.Tensor,
-    object_entity_names: Sequence[str],
-    motion_ref_cfg: SceneEntityCfg = SceneEntityCfg("motion_reference"),
-    object_name: str = "box",
-    invalid_object_pos: tuple[float, float, float] = (0.0, 0.0, -100.0),
-) -> None:
-    del env_ids
-    motion_ref: MotionReferenceManager = env.scene[motion_ref_cfg.name]
-    data: Part2LinkMotionReferenceData = motion_ref.data
-    state = getattr(env, "_part2link_object_variant_state", None)
-    if state is None:
-        return
-
-    object_slot = _scene_object_slot(motion_ref, object_name)
-    all_env_ids = torch.arange(env.num_envs, dtype=torch.long, device=env.device)
-    object_pos = data.object_pos_w[:, 0, object_slot].clone()
-    object_pos = object_pos + state.reference_position_offsets.to(device=object_pos.device, dtype=object_pos.dtype)
-    object_quat = _safe_unit_quat(data.object_quat_w[:, 0, object_slot])
-    lin_vel = data.object_lin_vel_w[:, 0, object_slot]
-    ang_vel = data.object_ang_vel_w[:, 0, object_slot]
-    object_validity = data.object_validity[:, 0, object_slot].to(torch.bool)
-    root_pose = torch.cat([object_pos, object_quat], dim=-1)
-    root_velocity = torch.cat([lin_vel, ang_vel], dim=-1)
-    invalid_pose = torch.zeros_like(root_pose)
-    invalid_pose[:, :3] = torch.tensor(invalid_object_pos, dtype=root_pose.dtype, device=root_pose.device)
-    invalid_pose[:, 3] = 1.0
-    zero_velocity = torch.zeros_like(root_velocity)
-
-    for variant_index, entity_name in enumerate(object_entity_names):
-        asset = env.scene[entity_name]
-        active_mask = (state.active_variant_ids == variant_index) & object_validity
-        if active_mask.any():
-            _write_pose_velocity(asset, root_pose[active_mask], root_velocity[active_mask], all_env_ids[active_mask])
-        inactive_mask = ~active_mask
-        if inactive_mask.any():
-            hidden_pose = invalid_pose[inactive_mask].clone()
-            hidden_pose[:, 0] += float(variant_index % 32) * _INACTIVE_OBJECT_SPACING
-            hidden_pose[:, 1] += float(variant_index // 32) * _INACTIVE_OBJECT_SPACING
-            _write_pose_velocity(asset, hidden_pose, zero_velocity[inactive_mask], all_env_ids[inactive_mask])
-    motion_ref.sync_reference_entity_state()
-
-
-def _active_object_state_w(env: ManagerBasedEnv, object_entity_names: Sequence[str]) -> tuple[torch.Tensor, ...]:
-    state = getattr(env, "_part2link_object_variant_state", None)
-    if state is None:
-        first_asset = env.scene[object_entity_names[0]]
-        return _root_pos(first_asset), _root_quat(first_asset), _root_lin_vel(first_asset), _root_ang_vel(first_asset)
-
-    pos_list = []
-    quat_list = []
-    lin_vel_list = []
-    ang_vel_list = []
-    for entity_name in object_entity_names:
-        asset = env.scene[entity_name]
-        pos_list.append(_root_pos(asset))
-        quat_list.append(_root_quat(asset))
-        lin_vel_list.append(_root_lin_vel(asset))
-        ang_vel_list.append(_root_ang_vel(asset))
-    env_ids = torch.arange(env.num_envs, dtype=torch.long, device=env.device)
-    variant_ids = state.active_variant_ids
-    pos = torch.stack(pos_list, dim=1)[env_ids, variant_ids]
-    quat = torch.stack(quat_list, dim=1)[env_ids, variant_ids]
-    lin_vel = torch.stack(lin_vel_list, dim=1)[env_ids, variant_ids]
-    ang_vel = torch.stack(ang_vel_list, dim=1)[env_ids, variant_ids]
-    return pos, quat, lin_vel, ang_vel
 
 
 def _object_reference_state_w(
@@ -807,7 +373,7 @@ def _compute_part2link_vectors_and_mask(
         expanded_quat.reshape(-1, 4),
         (link_pos_w - object_pos_w[:, None, :]).reshape(-1, 3),
     ).reshape_as(link_pos_w)
-    current_vector = link_pos_local[:, :, None, :] - state.active_centers_local[:, None, :, :]
+    current_vector = link_pos_local[:, :, None, :] - _squeeze_type_dim(state.active_centers_local)[:, None, :, :]
 
     gt_vector = _motion_frame_data(env, reference_cfg, "sparse_contact_link_part_center_vector_w")
     if gt_vector is None:
@@ -816,7 +382,7 @@ def _compute_part2link_vectors_and_mask(
         if debug_vis:
             env._part2link_debug_cache = None
         return current_vector, gt_vector, valid_mask
-    gt_vector = gt_vector[:, : current_vector.shape[1], : current_vector.shape[2], :] * state.active_scale[
+    gt_vector = gt_vector[:, : current_vector.shape[1], : current_vector.shape[2], :] * _squeeze_type_dim(state.active_scale)[
         :, None, None, None
     ]
 
@@ -851,9 +417,9 @@ def _compute_part2link_vectors_and_mask(
             "object_pos_w": object_pos_w.detach(),
             "object_quat_w": object_quat_w.detach(),
             "link_pos_w": link_pos_w.detach(),
-            "part_centers_local": state.active_centers_local.detach(),
-            "part_points_local": state.active_points_local.detach(),
-            "point_valid_mask": state.active_point_valid_mask.detach(),
+            "part_centers_local": _squeeze_type_dim(state.active_centers_local).detach(),
+            "part_points_local": _squeeze_type_dim(state.active_points_local).detach(),
+            "point_valid_mask": _squeeze_type_dim(state.active_point_valid_mask).detach(),
             "gt_vector_local": gt_vector.detach(),
             "current_vector": current_vector.detach(),
             "valid_mask": debug_valid_mask.detach(),
@@ -943,7 +509,7 @@ def part2link_vector_guidance_gauss(
         return torch.zeros(env.num_envs, dtype=current_vector.dtype, device=env.device)
 
     error = torch.linalg.vector_norm(current_vector - gt_vector, dim=-1)
-    precision = state.active_precision_scale
+    precision = _squeeze_type_dim(state.active_precision_scale)
     sigma = float(tracking_sigma) * precision
     tolerance = float(tracking_tolerance) * precision
     error = torch.clamp(error - tolerance[:, None, None], min=0.0)
@@ -976,13 +542,13 @@ def part2link_forbidden_contact_penalty(
     body_ids, _, _ = _resolve_metadata_body_ids(env, robot_cfg, data)
     link_pos_w = robot.data.body_link_pos_w[:, body_ids, :]
     object_pos_w, object_quat_w, _, _ = _active_object_state_w(env, _part2link_entity_names(env, state))
-    part_points_w = _transform_local_points_to_world(object_pos_w, object_quat_w, state.active_points_local)
+    part_points_w = _transform_local_points_to_world(object_pos_w, object_quat_w, _squeeze_type_dim(state.active_points_local))
 
     num_links = min(link_pos_w.shape[1], relation.shape[1])
     num_parts = min(part_points_w.shape[1], relation.shape[2])
     link_pos_w = link_pos_w[:, :num_links, :]
     part_points_w = part_points_w[:, :num_parts, :, :]
-    point_valid_mask = state.active_point_valid_mask[:, :num_parts, :]
+    point_valid_mask = _squeeze_type_dim(state.active_point_valid_mask)[:, :num_parts, :]
     forbidden_mask = relation[:, :num_links, :num_parts] == -1
 
     distances = torch.linalg.vector_norm(
@@ -1021,8 +587,8 @@ def seat_object_contact(
     body_ids, _ = robot.find_bodies(list(body_names), preserve_order=True)
     body_pos_w = robot.data.body_link_pos_w[:, body_ids, :]
     object_pos_w, object_quat_w, _, _ = _active_object_state_w(env, _part2link_entity_names(env, state))
-    seat_points_w = _transform_local_points_to_world(object_pos_w, object_quat_w, state.active_points_local)[:, seat_idx]
-    seat_mask = state.active_point_valid_mask[:, seat_idx]
+    seat_points_w = _transform_local_points_to_world(object_pos_w, object_quat_w, _squeeze_type_dim(state.active_points_local))[:, seat_idx]
+    seat_mask = _squeeze_type_dim(state.active_point_valid_mask)[:, seat_idx]
     distances = torch.linalg.vector_norm(body_pos_w[:, :, None, :] - seat_points_w[:, None, :, :], dim=-1)
     distances = torch.where(seat_mask[:, None, :], distances, torch.full_like(distances, float("inf")))
     return (distances.amin(dim=-1) < float(distance_threshold)).float()
@@ -1092,8 +658,8 @@ def any_object_filtered_contact(
     body_ids, _ = robot.find_bodies(list(body_names), preserve_order=True)
     body_pos_w = robot.data.body_link_pos_w[:, body_ids, :]
     object_pos_w, object_quat_w, _, _ = _active_object_state_w(env, _part2link_entity_names(env, state))
-    points_w = _transform_local_points_to_world(object_pos_w, object_quat_w, state.active_points_local[:, nonseat_indices])
-    point_mask = state.active_point_valid_mask[:, nonseat_indices]
+    points_w = _transform_local_points_to_world(object_pos_w, object_quat_w, _squeeze_type_dim(state.active_points_local)[:, nonseat_indices])
+    point_mask = _squeeze_type_dim(state.active_point_valid_mask)[:, nonseat_indices]
     distances = torch.linalg.vector_norm(body_pos_w[:, :, None, None, :] - points_w[:, None, :, :, :], dim=-1)
     distances = torch.where(point_mask[:, None, :, :], distances, torch.full_like(distances, float("inf")))
     return distances.amin(dim=(1, 2, 3)) < float(distance_threshold)
@@ -1179,6 +745,7 @@ class ObjectAlphaCurriculum(ManagerTermBase):
             progress = (float(env.common_step_counter) - float(start_step)) / float(end_step - start_step)
             progress = min(max(progress, 0.0), 1.0)
         alpha = initial_alpha + progress * (final_alpha - initial_alpha)
+        env._object_variant_current_alpha = float(alpha)
         env._part2link_object_current_alpha = float(alpha)
         return {"object_alpha_progress": progress, "object_alpha": float(alpha)}
 

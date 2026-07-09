@@ -116,6 +116,14 @@ export INSTINCT_PART2LINK_COLLISION_CACHE=/home/yangke/KY/InstinctLab_interact/d
 export SITTING_PART2LINK_ALPHA_VALUES=1.0,0.8,0.5,0.0
 ```
 
+如需在 play/viewer 中直接检查真实 CoACD 碰撞体，可临时启用碰撞可视模式：
+
+```bash
+export INSTINCT_PART2LINK_COLLISION_VISUAL_MODE=collision
+```
+
+默认模式会显示完整 visual mesh，并把 CoACD hull 放在隐藏 collision group；MuJoCo viewer 的 `Convex Hull` 按钮可能显示 visual mesh 的粗凸包，不代表真实接触体。该开关只建议调试时使用，训练默认保持未设置。
+
 当前 collision cache 已完整生成 18 个 chair。由于仍缺 `chair_51_alpha_0p00` 和 `chair_55` 的四档 alpha，先限制 chair 列表以避免 fail-fast：
 
 ```bash
@@ -242,6 +250,7 @@ uv run instinct-train Instinct-Perceptive-HOI-Shadowing-G1-v0
 | `INSTINCT_PART2LINK_DATASET_ROOT` | `data/datasets/interaction/output_npz_29dof_with_object` | Part2Link motion + mesh 数据 |
 | `INSTINCT_PART2LINK_ASSET_CACHE` | `None` | Part2Link OBJ 缓存目录 |
 | `INSTINCT_PART2LINK_COLLISION_CACHE` | `None` | CoACD 凸分解碰撞体缓存 |
+| `INSTINCT_PART2LINK_COLLISION_VISUAL_MODE` | `mesh` | 设为 `collision` 时在 play/viewer 中直接显示 CoACD 碰撞体 |
 | `SITTING_PART2LINK_CHAIR_NAMES` | 20 个 chair | 逗号分隔的 chair 名称过滤 |
 | `SITTING_PART2LINK_ALPHA_VALUES` | `1.0,0.8,0.5,0.0` | 逗号分隔的 morph alpha 值 |
 | `INSTINCT_HOI_VARIANT_ROOT` | `None` | HOI multi-variant mesh 目录 |

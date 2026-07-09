@@ -44,6 +44,7 @@ PART2LINK_METADATA_ROOT = os.path.join(PART2LINK_DATASET_ROOT, "sparse_contact_m
 SITTING_EXTENSION_ROOT = os.path.join(PART2LINK_DATASET_ROOT, "sofa_exntend_obj")
 SITTING_ASSET_CACHE = os.getenv("INSTINCT_PART2LINK_ASSET_CACHE")
 SITTING_COLLISION_CACHE = os.getenv("INSTINCT_PART2LINK_COLLISION_CACHE")
+SITTING_COLLISION_VISUAL_MODE = os.getenv("INSTINCT_PART2LINK_COLLISION_VISUAL_MODE", "mesh")
 SITTING_PART2LINK_ENV_SPACING = 8.0
 SITTING_VARIANT_SCALE_RANGE = (0.8, 1.2)
 SITTING_VARIANT_PRECISION_SCALE_RANGE = (0.8, 1.4)
@@ -187,16 +188,18 @@ def _make_part2link_object_spec(mesh_file_path: str, collision_mesh_file_paths: 
         mesh = spec.add_mesh(name="object_mesh", file=os.path.expanduser(mesh_file_path), scale=(1.0, 1.0, 1.0))
         body = spec.worldbody.add_body(name="object", mocap=True)
         if collision_mesh_file_paths:
-            body.add_geom(
-                name="object_visual",
-                type=mujoco.mjtGeom.mjGEOM_MESH,
-                meshname=mesh.name,
-                contype=0,
-                conaffinity=0,
-                density=0.0,
-                group=2,
-                rgba=(0.2, 0.55, 0.85, 1.0),
-            )
+            show_collision_as_visual = SITTING_COLLISION_VISUAL_MODE == "collision"
+            if not show_collision_as_visual:
+                body.add_geom(
+                    name="object_visual",
+                    type=mujoco.mjtGeom.mjGEOM_MESH,
+                    meshname=mesh.name,
+                    contype=0,
+                    conaffinity=0,
+                    density=0.0,
+                    group=2,
+                    rgba=(0.2, 0.55, 0.85, 1.0),
+                )
             mass_per_collision = 1.0 / len(collision_mesh_file_paths)
             for index, collision_mesh_file_path in enumerate(collision_mesh_file_paths):
                 collision_mesh = spec.add_mesh(
@@ -209,8 +212,8 @@ def _make_part2link_object_spec(mesh_file_path: str, collision_mesh_file_paths: 
                     type=mujoco.mjtGeom.mjGEOM_MESH,
                     meshname=collision_mesh.name,
                     mass=mass_per_collision,
-                    group=3,
-                    rgba=(1.0, 0.55, 0.05, 0.35),
+                    group=2 if show_collision_as_visual else 3,
+                    rgba=(0.2, 0.55, 0.85, 0.8) if show_collision_as_visual else (1.0, 0.55, 0.05, 0.35),
                     friction=(1.0, 0.005, 0.0001),
                 )
         else:

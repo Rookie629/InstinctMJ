@@ -141,6 +141,16 @@ DAMPING_7520_22 = 2.0 * DAMPING_RATIO * ARMATURE_7520_22 * NATURAL_FREQ
 DAMPING_4010 = 2.0 * DAMPING_RATIO * ARMATURE_4010 * NATURAL_FREQ
 
 
+# IsaacLab's DelayedPDActuator samples one command lag per episode (in
+# actuator.reset()) and holds it until the next reset. mjlab's DelayBuffer instead
+# resamples a new lag every physics step when delay_update_period == 0. To recover the
+# per-episode-fixed-delay semantics we resample only on reset: pick an update period
+# larger than any episode's physics-step count so the lag is drawn once on the first
+# post-reset step and then held, and disable per-env phase staggering so that draw
+# lands on the first step after each reset (with staggering enabled the random phase
+# offset would skip the step-0 draw and leave the lag pinned at its reset value of 0).
+_DELAY_RESET_ONLY_PERIOD = 1_000_000
+
 G1_29DOF_TORSOBASE_DELAYED_LEGS = BuiltinPdActuatorCfg(
     target_names_expr=(".*_hip_yaw_joint", ".*_hip_roll_joint", ".*_hip_pitch_joint"),
     effort_limit=88.0,
@@ -149,6 +159,8 @@ G1_29DOF_TORSOBASE_DELAYED_LEGS = BuiltinPdActuatorCfg(
     armature=0.03,
     delay_min_lag=0,
     delay_max_lag=1,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 G1_29DOF_TORSOBASE_DELAYED_KNEES = BuiltinPdActuatorCfg(
     target_names_expr=(".*_knee_joint",),
@@ -158,6 +170,8 @@ G1_29DOF_TORSOBASE_DELAYED_KNEES = BuiltinPdActuatorCfg(
     armature=0.03,
     delay_min_lag=0,
     delay_max_lag=1,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 G1_29DOF_TORSOBASE_DELAYED_WAIST = BuiltinPdActuatorCfg(
     target_names_expr=("waist_roll_joint", "waist_pitch_joint"),
@@ -167,6 +181,8 @@ G1_29DOF_TORSOBASE_DELAYED_WAIST = BuiltinPdActuatorCfg(
     armature=0.03,
     delay_min_lag=0,
     delay_max_lag=1,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 G1_29DOF_TORSOBASE_DELAYED_WAIST_YAW = BuiltinPdActuatorCfg(
     target_names_expr=("waist_yaw_joint",),
@@ -176,6 +192,8 @@ G1_29DOF_TORSOBASE_DELAYED_WAIST_YAW = BuiltinPdActuatorCfg(
     armature=0.03,
     delay_min_lag=0,
     delay_max_lag=1,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 G1_29DOF_TORSOBASE_DELAYED_FEET = BuiltinPdActuatorCfg(
     target_names_expr=(".*_ankle_pitch_joint", ".*_ankle_roll_joint"),
@@ -185,6 +203,8 @@ G1_29DOF_TORSOBASE_DELAYED_FEET = BuiltinPdActuatorCfg(
     armature=0.03,
     delay_min_lag=0,
     delay_max_lag=1,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 G1_29DOF_TORSOBASE_DELAYED_ARMS = BuiltinPdActuatorCfg(
     target_names_expr=(
@@ -199,6 +219,8 @@ G1_29DOF_TORSOBASE_DELAYED_ARMS = BuiltinPdActuatorCfg(
     armature=0.03,
     delay_min_lag=0,
     delay_max_lag=1,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 G1_29DOF_TORSOBASE_DELAYED_WRIST_ROLL = BuiltinPdActuatorCfg(
     target_names_expr=(".*wrist_roll_joint",),
@@ -208,6 +230,8 @@ G1_29DOF_TORSOBASE_DELAYED_WRIST_ROLL = BuiltinPdActuatorCfg(
     armature=0.03,
     delay_min_lag=0,
     delay_max_lag=1,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 G1_29DOF_TORSOBASE_DELAYED_WRIST_PITCH_YAW = BuiltinPdActuatorCfg(
     target_names_expr=(".*wrist_pitch_joint", ".*wrist_yaw_joint"),
@@ -217,6 +241,8 @@ G1_29DOF_TORSOBASE_DELAYED_WRIST_PITCH_YAW = BuiltinPdActuatorCfg(
     armature=0.03,
     delay_min_lag=0,
     delay_max_lag=1,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 g1_29dof_torsobase_delayed_actuator_cfgs: tuple[ActuatorCfg, ...] = (
     G1_29DOF_TORSOBASE_DELAYED_LEGS,
@@ -304,6 +330,8 @@ BEYONDMIMIC_G1_29DOF_DELAYED_LEGS_PITCH_YAW = BuiltinPdActuatorCfg(
     armature=ARMATURE_7520_14,
     delay_min_lag=0,
     delay_max_lag=2,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 BEYONDMIMIC_G1_29DOF_DELAYED_WAIST_YAW = BuiltinPdActuatorCfg(
     target_names_expr=("waist_yaw_joint",),
@@ -313,6 +341,8 @@ BEYONDMIMIC_G1_29DOF_DELAYED_WAIST_YAW = BuiltinPdActuatorCfg(
     armature=ARMATURE_7520_14,
     delay_min_lag=0,
     delay_max_lag=2,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 BEYONDMIMIC_G1_29DOF_DELAYED_LEGS_ROLL_KNEE = BuiltinPdActuatorCfg(
     target_names_expr=(".*_hip_roll_joint", ".*_knee_joint"),
@@ -322,6 +352,8 @@ BEYONDMIMIC_G1_29DOF_DELAYED_LEGS_ROLL_KNEE = BuiltinPdActuatorCfg(
     armature=ARMATURE_7520_22,
     delay_min_lag=0,
     delay_max_lag=2,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 BEYONDMIMIC_G1_29DOF_DELAYED_FEET = BuiltinPdActuatorCfg(
     target_names_expr=(".*_ankle_pitch_joint", ".*_ankle_roll_joint"),
@@ -331,6 +363,8 @@ BEYONDMIMIC_G1_29DOF_DELAYED_FEET = BuiltinPdActuatorCfg(
     armature=2.0 * ARMATURE_5020,
     delay_min_lag=0,
     delay_max_lag=2,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 BEYONDMIMIC_G1_29DOF_DELAYED_WAIST = BuiltinPdActuatorCfg(
     target_names_expr=("waist_roll_joint", "waist_pitch_joint"),
@@ -340,6 +374,8 @@ BEYONDMIMIC_G1_29DOF_DELAYED_WAIST = BuiltinPdActuatorCfg(
     armature=2.0 * ARMATURE_5020,
     delay_min_lag=0,
     delay_max_lag=2,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 BEYONDMIMIC_G1_29DOF_DELAYED_ARMS_5020 = BuiltinPdActuatorCfg(
     target_names_expr=(
@@ -355,6 +391,8 @@ BEYONDMIMIC_G1_29DOF_DELAYED_ARMS_5020 = BuiltinPdActuatorCfg(
     armature=ARMATURE_5020,
     delay_min_lag=0,
     delay_max_lag=2,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 BEYONDMIMIC_G1_29DOF_DELAYED_ARMS_4010 = BuiltinPdActuatorCfg(
     target_names_expr=(".*_wrist_pitch_joint", ".*_wrist_yaw_joint"),
@@ -364,6 +402,8 @@ BEYONDMIMIC_G1_29DOF_DELAYED_ARMS_4010 = BuiltinPdActuatorCfg(
     armature=ARMATURE_4010,
     delay_min_lag=0,
     delay_max_lag=2,
+    delay_update_period=_DELAY_RESET_ONLY_PERIOD,
+    delay_per_env_phase=False,
 )
 beyondmimic_g1_29dof_delayed_actuator_cfgs: tuple[ActuatorCfg, ...] = (
     BEYONDMIMIC_G1_29DOF_DELAYED_LEGS_PITCH_YAW,
